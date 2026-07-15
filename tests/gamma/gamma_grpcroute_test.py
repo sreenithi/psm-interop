@@ -19,7 +19,6 @@ from typing_extensions import override
 
 from framework import xds_gamma_testcase
 from framework import xds_k8s_testcase
-from framework.helpers import skips
 from framework.infrastructure import k8s
 from framework.test_app.runners.k8s import gamma_server_runner
 
@@ -31,11 +30,6 @@ _XdsTestClient = xds_k8s_testcase.XdsTestClient
 
 
 class GammaGrpcRouteTest(xds_gamma_testcase.GammaXdsKubernetesTestCase):
-    @staticmethod
-    @override
-    def is_supported(config: skips.TestConfig) -> bool:
-        return False
-
     @override
     def initKubernetesServerRunner(
         self, **kwargs
