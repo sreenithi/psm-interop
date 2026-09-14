@@ -26,11 +26,13 @@ flags.adopt_module_key_flags(xds_k8s_testcase)
 # Type aliases
 _XdsTestServer = xds_k8s_testcase.XdsTestServer
 _XdsTestClient = xds_k8s_testcase.XdsTestClient
-_SecurityMode = xds_k8s_testcase.SecurityXdsKubernetesTestCase.SecurityMode
+_SecurityMode = (
+    xds_k8s_testcase.SecurityAppNetXdsKubernetesTestCase.SecurityMode
+)
 _Lang = skips.Lang
 
 
-class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
+class SecurityTest(xds_k8s_testcase.SecurityAppNetXdsKubernetesTestCase):
     @staticmethod
     def is_supported(config: skips.TestConfig) -> bool:
         if config.client_lang in (
@@ -120,7 +122,7 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
         - Creation of a backendService, and attaching the backend (NEG)
         - Creation of the Server mTLS Policy, and attaching to the ECS
         - Creation of the Client TLS Policy, and attaching to the backendService
-        - Creation of the urlMap, targetProxy, and forwardingRule
+        - Creation of the mesh and grpcRoute
 
         With this sequence we are sure that when the client receives the
         endpoints of the backendService the security-config would also have
@@ -144,10 +146,10 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
             client_mtls=False,
         )
 
-        # Create the routing rule map.
-        self.td.setup_routing_rule_map_for_grpc(
-            self.server_xds_host, self.server_xds_port
-        )
+        # Create the mesh and grpc route.
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
+
         # Now that TD setup is complete, Backend Service can be populated
         # with healthy backends (NEGs).
         self.td.wait_for_backends_healthy_status()
@@ -196,10 +198,10 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
             mtls=False,
         )
 
-        # Create the routing rule map.
-        self.td.setup_routing_rule_map_for_grpc(
-            self.server_xds_host, self.server_xds_port
-        )
+        # Create the mesh and grpc route.
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
+
         # Now that TD setup is complete, Backend Service can be populated
         # with healthy backends (NEGs).
         self.td.wait_for_backends_healthy_status()
@@ -218,3 +220,4 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
 
 if __name__ == "__main__":
     absltest.main()
+

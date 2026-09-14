@@ -28,7 +28,9 @@ flags.adopt_module_key_flags(xds_k8s_testcase)
 # Type aliases
 _XdsTestServer = xds_k8s_testcase.XdsTestServer
 _XdsTestClient = xds_k8s_testcase.XdsTestClient
-_SecurityMode = xds_k8s_testcase.SecurityXdsKubernetesTestCase.SecurityMode
+_SecurityMode = (
+    xds_k8s_testcase.SecurityAppNetXdsKubernetesTestCase.SecurityMode
+)
 _Lang = skips.Lang
 
 # The client generates QPS even when it is still loading information from xDS.
@@ -41,7 +43,7 @@ _SETTLE_DURATION = datetime.timedelta(seconds=5)
 _SAMPLE_DURATION = datetime.timedelta(seconds=0.5)
 
 
-class AuthzTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
+class AuthzTest(xds_k8s_testcase.SecurityAppNetXdsKubernetesTestCase):
     RPC_TYPE_CYCLE = {
         "UNARY_CALL": "EMPTY_CALL",
         "EMPTY_CALL": "UNARY_CALL",
@@ -225,7 +227,11 @@ class AuthzTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
         )
 
     def test_plaintext_allow(self) -> None:
-        self.setupTrafficDirectorGrpc()
+        self.td.setup_backend_for_grpc(
+            health_check_port=self.server_maintenance_port
+        )
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
         self.td.create_authz_policy(action="ALLOW", rules=self.authz_rules())
         self.setupSecurityPolicies(
             server_tls=False,
@@ -303,7 +309,11 @@ class AuthzTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
             )
 
     def test_tls_allow(self) -> None:
-        self.setupTrafficDirectorGrpc()
+        self.td.setup_backend_for_grpc(
+            health_check_port=self.server_maintenance_port
+        )
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
         self.td.create_authz_policy(action="ALLOW", rules=self.authz_rules())
         self.setupSecurityPolicies(
             server_tls=True,
@@ -335,7 +345,11 @@ class AuthzTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
             )
 
     def test_mtls_allow(self) -> None:
-        self.setupTrafficDirectorGrpc()
+        self.td.setup_backend_for_grpc(
+            health_check_port=self.server_maintenance_port
+        )
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
         self.td.create_authz_policy(action="ALLOW", rules=self.authz_rules())
         self.setupSecurityPolicies(
             server_tls=True, server_mtls=True, client_tls=True, client_mtls=True
@@ -374,7 +388,11 @@ class AuthzTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
             )
 
     def test_plaintext_deny(self) -> None:
-        self.setupTrafficDirectorGrpc()
+        self.td.setup_backend_for_grpc(
+            health_check_port=self.server_maintenance_port
+        )
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
         self.td.create_authz_policy(action="DENY", rules=self.authz_rules())
         self.setupSecurityPolicies(
             server_tls=False,

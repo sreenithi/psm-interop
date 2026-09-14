@@ -64,6 +64,9 @@ flags.adopt_module_key_flags(xds_k8s_flags)
 TrafficDirectorManager = traffic_director.TrafficDirectorManager
 TrafficDirectorAppNetManager = traffic_director.TrafficDirectorAppNetManager
 TrafficDirectorSecureManager = traffic_director.TrafficDirectorSecureManager
+TrafficDirectorAppNetSecureManager = (
+    traffic_director.TrafficDirectorAppNetSecureManager
+)
 XdsTestServer = server_app.XdsTestServer
 XdsTestClient = client_app.XdsTestClient
 ClientDeploymentArgs = k8s_xds_client_runner.ClientDeploymentArgs
@@ -1800,3 +1803,464 @@ class SecurityXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
             return "missing"
         sha1 = hashlib.sha1(cert)
         return f"sha1={sha1.hexdigest()}, len={len(cert)}"
+
+
+class SecurityAppNetXdsKubernetesTestCase(AppNetXdsKubernetesTestCase):
+    """Test case base class for testing PSM security features with AppNet in isolation."""
+
+    td: TrafficDirectorAppNetSecureManager
+
+    class SecurityMode(enum.Enum):
+        MTLS = enum.auto()
+        TLS = enum.auto()
+        PLAINTEXT = enum.auto()
+
+    @classmethod
+    def setUpClass(cls):
+        """Hook method for setting up class fixture before running tests in
+        the class.
+        """
+        super().setUpClass()
+        if cls.server_maintenance_port is None:
+            # In secure mode, the maintenance port is different from
+            # the test port to keep it insecure, and make
+            # Health Checks and Channelz tests available.
+            # When not provided, use explicit numeric port value, so
+            # Backend Health Checks are created on a fixed port.
+            cls.server_maintenance_port = (
+                KubernetesServerRunner.DEFAULT_SECURE_MODE_MAINTENANCE_PORT
+            )
+
+    def initTrafficDirectorManager(self) -> TrafficDirectorAppNetSecureManager:
+        return TrafficDirectorAppNetSecureManager(
+            self.gcp_api_manager,
+            project=self.project,
+            resource_prefix=self.resource_prefix,
+            resource_suffix=self.resource_suffix,
+            network=self.network,
+            compute_api_version=self.compute_api_version,
+            enable_dualstack=self.enable_dualstack,
+            xds_server_region=self.xds_server_region,
+        )
+
+    def initKubernetesServerRunner(self, **kwargs) -> KubernetesServerRunner:
+        return KubernetesServerRunner(
+            k8s.KubernetesNamespace(
+                self.k8s_api_manager, self.server_namespace
+            ),
+            deployment_name=self.server_name,
+            image_name=self.server_image,
+            td_bootstrap_image=self.td_bootstrap_image,
+            gcp_project=self.project,
+            gcp_api_manager=self.gcp_api_manager,
+            gcp_service_account=self.gcp_service_account,
+            network=self.network,
+            xds_server_uri=self.xds_server_uri,
+            xds_server_region=self.xds_server_region,
+            deployment_template="server-secure.deployment.yaml",
+            debug_use_port_forwarding=self.debug_use_port_forwarding,
+            enable_workload_identity=self.enable_workload_identity,
+            workload_identity_iam_policy_binding=self.workload_identity_iam_policy_binding,
+            **kwargs,
+        )
+
+    def initKubernetesClientRunner(self, **kwargs) -> KubernetesClientRunner:
+        return KubernetesClientRunner(
+            k8s.KubernetesNamespace(
+                self.k8s_api_manager, self.client_namespace
+            ),
+            deployment_name=self.client_name,
+            image_name=self.client_image,
+            td_bootstrap_image=self.td_bootstrap_image,
+            gcp_project=self.project,
+            gcp_api_manager=self.gcp_api_manager,
+            gcp_service_account=self.gcp_service_account,
+            xds_server_uri=self.xds_server_uri,
+            xds_server_region=self.xds_server_region,
+            network=self.network,
+            deployment_template="client-secure.deployment.yaml",
+            stats_port=self.client_port,
+            reuse_namespace=self.server_namespace == self.client_namespace,
+            debug_use_port_forwarding=self.debug_use_port_forwarding,
+            enable_workload_identity=self.enable_workload_identity,
+            workload_identity_iam_policy_binding=self.workload_identity_iam_policy_binding,
+            **kwargs,
+        )
+
+    def startSecureTestServer(self, replica_count=1, **kwargs) -> XdsTestServer:
+        test_server = self.server_runner.run(
+            replica_count=replica_count,
+            test_port=self.server_port,
+            maintenance_port=self.server_maintenance_port,
+            secure_mode=True,
+            **kwargs,
+        )[0]
+        test_server.set_xds_address(
+            self.server_xds_host,
+            self.server_xds_port,
+            self.server_xds_authority,
+        )
+        return test_server
+
+    def setupSecurityPolicies(
+        self, *, server_tls, server_mtls, client_tls, client_mtls
+    ):
+        self.td.setup_client_security(
+            server_namespace=self.server_namespace,
+            server_name=self.server_name,
+            tls=client_tls,
+            mtls=client_mtls,
+        )
+        self.td.setup_server_security(
+            server_namespace=self.server_namespace,
+            server_name=self.server_name,
+            server_port=self.server_port,
+            tls=server_tls,
+            mtls=server_mtls,
+        )
+
+    def setupTrafficDirectorGrpcWithSecurity(
+        self, server_tls, server_mtls, client_tls, client_mtls
+    ):
+        # Create policies first
+        self.td.create_client_tls_policy(tls=client_tls, mtls=client_mtls)
+        self.td.create_server_tls_policy(tls=server_tls, mtls=server_mtls)
+
+        self.td.create_endpoint_policy(
+            server_namespace=self.server_namespace,
+            server_name=self.server_name,
+            server_port=self.server_port,
+        )
+
+        security_settings = None
+        if self.td.client_tls_policy:
+            server_spiffe = (
+                f"spiffe://{self.project}.svc.id.goog/"
+                f"ns/{self.server_namespace}/sa/{self.server_name}"
+            )
+            security_settings = {
+                "clientTlsPolicy": self.td.client_tls_policy.url,
+                "subjectAltNames": [server_spiffe],
+            }
+
+        self.td.setup_backend_for_grpc(
+            health_check_port=self.server_maintenance_port,
+            security_settings=security_settings,
+        )
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
+
+    def startSecureTestClient(
+        self,
+        test_server: XdsTestServer,
+        *,
+        wait_for_server_channel_ready=True,
+        config_mesh: Optional[str] = None,
+        **kwargs,
+    ) -> XdsTestClient:
+        if config_mesh is None and self.td.mesh:
+            config_mesh = self.td.mesh.name
+        return self._start_test_client(
+            server_target=test_server.xds_uri,
+            wait_for_server_channel_ready=wait_for_server_channel_ready,
+            secure_mode=True,
+            config_mesh=config_mesh,
+            **kwargs,
+        )
+
+    def assertTestAppSecurity(
+        self,
+        mode: SecurityMode,
+        test_client: XdsTestClient,
+        test_server: XdsTestServer,
+        *,
+        secure_channel: bool = False,
+        match_only_port: bool = False,
+    ):
+        """Asserts that the test client and server are using the expected
+        security configuration.
+
+        Args:
+            mode: The expected security mode (MTLS, TLS, or PLAINTEXT).
+            test_client: The test client instance.
+            test_server: The test server instance.
+            secure_channel: Use a secure channel to call services exposed by the Cloud Run client.
+            match_only_port: Whether to match only the port (not the IP address)
+            in socket comparisons useful in cases like VPC routing where IPs may differ.
+        """
+        client_socket, server_socket = self.getConnectedSockets(
+            test_client,
+            test_server,
+            secure_channel=secure_channel,
+            match_only_port=match_only_port,
+        )
+        server_security: grpc_channelz.Security = server_socket.security
+        client_security: grpc_channelz.Security = client_socket.security
+        logger.info("Server certs: %s", self.debug_sock_certs(server_security))
+        logger.info("Client certs: %s", self.debug_sock_certs(client_security))
+
+        if mode is self.SecurityMode.MTLS:
+            self.assertSecurityMtls(client_security, server_security)
+        elif mode is self.SecurityMode.TLS:
+            self.assertSecurityTls(client_security, server_security)
+        elif mode is self.SecurityMode.PLAINTEXT:
+            self.assertSecurityPlaintext(client_security, server_security)
+        else:
+            raise TypeError("Incorrect security mode")
+
+    def assertTestAppSecurityWithRetry(
+        self,
+        mode: SecurityMode,
+        test_client: XdsTestClient,
+        test_server: XdsTestServer,
+        *,
+        secure_channel: bool = False,
+        match_only_port: bool = False,
+        retry_timeout: dt.timedelta = dt.timedelta(minutes=5),
+    ):
+        """Retries assertTestAppSecurity until it passes or timeout expires.
+
+        Since security config propagation is eventually consistent, there will
+        be periods of time when the config may not be applied. This method
+        helps to avoid flakiness in tests by retrying the security assertion.
+        """
+        retryer = retryers.exponential_retryer_with_timeout(
+            wait_min=dt.timedelta(seconds=10),
+            wait_max=dt.timedelta(seconds=25),
+            timeout=retry_timeout,
+            log_level=logging.INFO,
+            error_note=(
+                f"Could not find correct security"
+                f" before timeout {retry_timeout} (h:mm:ss)"
+            ),
+        )
+        retryer(
+            self.assertTestAppSecurity,
+            mode,
+            test_client,
+            test_server,
+            secure_channel=secure_channel,
+            match_only_port=match_only_port,
+        )
+
+    def assertSecurityMtls(
+        self,
+        client_security: grpc_channelz.Security,
+        server_security: grpc_channelz.Security,
+    ):
+        self.assertEqual(
+            client_security.WhichOneof("model"),
+            "tls",
+            msg="(mTLS) Client socket security model must be TLS",
+        )
+        self.assertEqual(
+            server_security.WhichOneof("model"),
+            "tls",
+            msg="(mTLS) Server socket security model must be TLS",
+        )
+        server_tls, client_tls = server_security.tls, client_security.tls
+
+        # Confirm regular TLS: server local cert == client remote cert
+        self.assertNotEmpty(
+            client_tls.remote_certificate,
+            msg="(mTLS) Client remote certificate is missing",
+        )
+        if self.check_local_certs:
+            self.assertNotEmpty(
+                server_tls.local_certificate,
+                msg="(mTLS) Server local certificate is missing",
+            )
+            self.assertEqual(
+                server_tls.local_certificate,
+                client_tls.remote_certificate,
+                msg=(
+                    "(mTLS) Server local certificate must match client's "
+                    "remote certificate"
+                ),
+            )
+
+        # mTLS: server remote cert == client local cert
+        self.assertNotEmpty(
+            server_tls.remote_certificate,
+            msg="(mTLS) Server remote certificate is missing",
+        )
+        if self.check_local_certs:
+            self.assertNotEmpty(
+                client_tls.local_certificate,
+                msg="(mTLS) Client local certificate is missing",
+            )
+            self.assertEqual(
+                server_tls.remote_certificate,
+                client_tls.local_certificate,
+                msg=(
+                    "(mTLS) Server remote certificate must match client's "
+                    "local certificate"
+                ),
+            )
+
+    def assertSecurityTls(
+        self,
+        client_security: grpc_channelz.Security,
+        server_security: grpc_channelz.Security,
+    ):
+        self.assertEqual(
+            client_security.WhichOneof("model"),
+            "tls",
+            msg="(TLS) Client socket security model must be TLS",
+        )
+        self.assertEqual(
+            server_security.WhichOneof("model"),
+            "tls",
+            msg="(TLS) Server socket security model must be TLS",
+        )
+        server_tls, client_tls = server_security.tls, client_security.tls
+
+        # Regular TLS: server local cert == client remote cert
+        self.assertNotEmpty(
+            client_tls.remote_certificate,
+            msg="(TLS) Client remote certificate is missing",
+        )
+        if self.check_local_certs:
+            self.assertNotEmpty(
+                server_tls.local_certificate,
+                msg="(TLS) Server local certificate is missing",
+            )
+            self.assertEqual(
+                server_tls.local_certificate,
+                client_tls.remote_certificate,
+                msg=(
+                    "(TLS) Server local certificate must match client "
+                    "remote certificate"
+                ),
+            )
+
+        # mTLS must not be used
+        self.assertEmpty(
+            server_tls.remote_certificate,
+            msg=(
+                "(TLS) Server remote certificate must be empty in TLS mode. "
+                "Is server security incorrectly configured for mTLS?"
+            ),
+        )
+        self.assertEmpty(
+            client_tls.local_certificate,
+            msg=(
+                "(TLS) Client local certificate must be empty in TLS mode. "
+                "Is client security incorrectly configured for mTLS?"
+            ),
+        )
+
+    def assertSecurityPlaintext(self, client_security, server_security):
+        server_tls, client_tls = server_security.tls, client_security.tls
+        # Not TLS
+        self.assertEmpty(
+            server_tls.local_certificate,
+            msg="(Plaintext) Server local certificate must be empty.",
+        )
+        self.assertEmpty(
+            client_tls.local_certificate,
+            msg="(Plaintext) Client local certificate must be empty.",
+        )
+
+        # Not mTLS
+        self.assertEmpty(
+            server_tls.remote_certificate,
+            msg="(Plaintext) Server remote certificate must be empty.",
+        )
+        self.assertEmpty(
+            client_tls.local_certificate,
+            msg="(Plaintext) Client local certificate must be empty.",
+        )
+
+    def assertClientCannotReachServerRepeatedly(
+        self,
+        test_client: XdsTestClient,
+        *,
+        times: Optional[int] = None,
+        delay: Optional[_timedelta] = None,
+    ):
+        """
+        Asserts that the client repeatedly cannot reach the server.
+
+        With negative tests we can't be absolutely certain expected failure
+        state is not caused by something else.
+        To mitigate for this, we repeat the checks several times, and expect
+        all of them to succeed.
+
+        This is useful in case the channel eventually stabilizes, and RPCs pass.
+
+        Args:
+            test_client: An instance of XdsTestClient
+            times: Optional; A positive number of times to confirm that
+                the server is unreachable. Defaults to `3` attempts.
+            delay: Optional; Specifies how long to wait before the next check.
+                Defaults to `10` seconds.
+        """
+        if times is None or times < 1:
+            times = 3
+        if delay is None:
+            delay = _timedelta(seconds=10)
+
+        for i in range(1, times + 1):
+            self.assertClientCannotReachServer(test_client)
+            if i < times:
+                logger.info(
+                    "Check %s passed, waiting %s before the next check",
+                    i,
+                    delay,
+                )
+                time.sleep(delay.total_seconds())
+
+    def assertClientCannotReachServer(self, test_client: XdsTestClient):
+        self.assertClientChannelFailed(test_client)
+        self.assertFailedRpcs(test_client)
+
+    def assertClientChannelFailed(self, test_client: XdsTestClient):
+        channel = test_client.wait_for_server_channel_state(
+            state=_ChannelState.TRANSIENT_FAILURE
+        )
+        subchannels = list(
+            test_client.channelz.list_channel_subchannels(channel)
+        )
+        self.assertLen(
+            subchannels,
+            1,
+            msg=(
+                "Client channel must have exactly one subchannel "
+                "in state TRANSIENT_FAILURE."
+            ),
+        )
+
+    @staticmethod
+    def getConnectedSockets(
+        test_client: XdsTestClient,
+        test_server: XdsTestServer,
+        *,
+        secure_channel: bool = False,
+        match_only_port: bool = False,
+    ) -> Tuple[grpc_channelz.Socket, grpc_channelz.Socket]:
+        client_sock = test_client.get_active_server_channel_socket(
+            secure_channel=secure_channel
+        )
+        server_sock = test_server.get_server_socket_matching_client(
+            client_sock, match_only_port=match_only_port
+        )
+        return client_sock, server_sock
+
+    @classmethod
+    def debug_sock_certs(cls, security: grpc_channelz.Security):
+        if security.WhichOneof("model") == "other":
+            return f"other: <{security.other.name}={security.other.value}>"
+
+        return (
+            f"local: <{cls.debug_cert(security.tls.local_certificate)}>, "
+            f"remote: <{cls.debug_cert(security.tls.remote_certificate)}>"
+        )
+
+    @staticmethod
+    def debug_cert(cert):
+        if not cert:
+            return "missing"
+        sha1 = hashlib.sha1(cert)
+        return f"sha1={sha1.hexdigest()}, len={len(cert)}"
+
