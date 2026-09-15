@@ -1954,7 +1954,18 @@ class SecurityAppNetXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
         self,
         test_server: XdsTestServer,
         *,
-        wait_for_server_channel_ready=True,
+        wait_for_server_channel_ready: bool = True,
+        # Newly created Meshes in AppNet can take several minutes to propagate
+        # to the global Traffic Director control plane. During this window, ADS
+        # calls are rejected with "NOT_FOUND: Traffic Director configuration was
+        # not found for mesh". We set default 10-minute timeouts matching
+        # AppNet/GAMMA tests.
+        wait_for_active_ads_timeout: Optional[_timedelta] = _timedelta(
+            minutes=10
+        ),
+        wait_for_server_channel_ready_timeout: Optional[_timedelta] = _timedelta(
+            minutes=10
+        ),
         config_mesh: Optional[str] = None,
         **kwargs,
     ) -> XdsTestClient:
@@ -1963,6 +1974,8 @@ class SecurityAppNetXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
         return self._start_test_client(
             server_target=test_server.xds_uri,
             wait_for_server_channel_ready=wait_for_server_channel_ready,
+            wait_for_active_ads_timeout=wait_for_active_ads_timeout,
+            wait_for_server_channel_ready_timeout=wait_for_server_channel_ready_timeout,
             secure_mode=True,
             config_mesh=config_mesh,
             **kwargs,
