@@ -26,13 +26,11 @@ flags.adopt_module_key_flags(xds_k8s_testcase)
 # Type aliases
 _XdsTestServer = xds_k8s_testcase.XdsTestServer
 _XdsTestClient = xds_k8s_testcase.XdsTestClient
-_SecurityMode = (
-    xds_k8s_testcase.SecurityAppNetXdsKubernetesTestCase.SecurityMode
-)
+_SecurityMode = xds_k8s_testcase.SecurityXdsKubernetesTestCase.SecurityMode
 _Lang = skips.Lang
 
 
-class SecurityTest(xds_k8s_testcase.SecurityAppNetXdsKubernetesTestCase):
+class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
     @staticmethod
     def is_supported(config: skips.TestConfig) -> bool:
         if config.client_lang in (

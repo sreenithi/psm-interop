@@ -28,9 +28,7 @@ flags.adopt_module_key_flags(xds_k8s_testcase)
 # Type aliases
 _XdsTestServer = xds_k8s_testcase.XdsTestServer
 _XdsTestClient = xds_k8s_testcase.XdsTestClient
-_SecurityMode = (
-    xds_k8s_testcase.SecurityAppNetXdsKubernetesTestCase.SecurityMode
-)
+_SecurityMode = xds_k8s_testcase.SecurityXdsKubernetesTestCase.SecurityMode
 _Lang = skips.Lang
 
 # The client generates QPS even when it is still loading information from xDS.
@@ -43,7 +41,7 @@ _SETTLE_DURATION = datetime.timedelta(seconds=5)
 _SAMPLE_DURATION = datetime.timedelta(seconds=0.5)
 
 
-class AuthzTest(xds_k8s_testcase.SecurityAppNetXdsKubernetesTestCase):
+class AuthzTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
     RPC_TYPE_CYCLE = {
         "UNARY_CALL": "EMPTY_CALL",
         "EMPTY_CALL": "UNARY_CALL",
