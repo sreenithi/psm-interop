@@ -1805,7 +1805,7 @@ class SecurityXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
         return f"sha1={sha1.hexdigest()}, len={len(cert)}"
 
 
-class SecurityAppNetXdsKubernetesTestCase(AppNetXdsKubernetesTestCase):
+class SecurityAppNetXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
     """Test case base class for testing PSM security features with AppNet in isolation."""
 
     td: TrafficDirectorAppNetSecureManager
