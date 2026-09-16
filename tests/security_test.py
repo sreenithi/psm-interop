@@ -117,24 +117,31 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
         client. To ensure that we will perform the following steps in that
         sequence:
 
-        - Creation of a backendService, and attaching the backend (NEG)
-        - Creation of the Server mTLS Policy, and attaching to the ECS
+        - Creation of a backendService, mesh, and grpcRoute
+        - Creation of the Server mTLS Policy, and attaching to the EndpointPolicy
         - Creation of the Client TLS Policy, and attaching to the backendService
-        - Creation of the mesh and grpcRoute
+        - Creation of the server and attaching healthy backends (NEGs)
+        - Start the client and confirm connection failure
 
         With this sequence we are sure that when the client receives the
         endpoints of the backendService the security-config would also have
         been received as confirmed by the TD team.
+
+        Additionally, creating the mesh and grpcRoute upfront allows Traffic
+        Director's background control plane propagation to begin while the
+        server and backends are initializing, reducing the frequency of
+        transient "Traffic Director configuration was not found for mesh" errors
+        (b/465910984).
         """
         # Create backend service
         self.td.setup_backend_for_grpc(
             health_check_port=self.server_maintenance_port
         )
 
-        # Start server and attach its NEGs to the backend service, but
-        # until they become healthy.
-        test_server: _XdsTestServer = self.startSecureTestServer()
-        self.setupServerBackends(wait_for_healthy_status=False)
+        # Create the mesh and grpc route upfront to allow maximum TD
+        # propagation time (b/465910984).
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
 
         # Setup policies and attach them.
         self.setupSecurityPolicies(
@@ -144,13 +151,9 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
             client_mtls=False,
         )
 
-        # Create the mesh and grpc route.
-        self.td.create_mesh()
-        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
-
-        # Now that TD setup is complete, Backend Service can be populated
-        # with healthy backends (NEGs).
-        self.td.wait_for_backends_healthy_status()
+        # Start server and attach its NEGs to the backend service.
+        test_server: _XdsTestServer = self.startSecureTestServer()
+        self.setupServerBackends()
 
         # Start the client, but don't wait for it to report a healthy channel.
         test_client: _XdsTestClient = self.startSecureTestClient(
@@ -174,13 +177,13 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
             health_check_port=self.server_maintenance_port
         )
 
-        # Start server and attach its NEGs to the backend service, but
-        # until they become healthy.
-        test_server: _XdsTestServer = self.startSecureTestServer()
-        self.setupServerBackends(wait_for_healthy_status=False)
+        # Create the mesh and grpc route upfront to allow maximum TD
+        # propagation time (b/465910984).
+        self.td.create_mesh()
+        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
 
         # Regular TLS setup, but with client policy configured using
-        # intentionality incorrect server_namespace.
+        # intentionally incorrect server_namespace.
         self.td.setup_server_security(
             server_namespace=self.server_namespace,
             server_name=self.server_name,
@@ -196,13 +199,9 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
             mtls=False,
         )
 
-        # Create the mesh and grpc route.
-        self.td.create_mesh()
-        self.td.create_grpc_route(self.server_xds_host, self.server_xds_port)
-
-        # Now that TD setup is complete, Backend Service can be populated
-        # with healthy backends (NEGs).
-        self.td.wait_for_backends_healthy_status()
+        # Start server and attach its NEGs to the backend service.
+        test_server: _XdsTestServer = self.startSecureTestServer()
+        self.setupServerBackends()
 
         # Start the client, but don't wait for it to report a healthy channel.
         test_client: _XdsTestClient = self.startSecureTestClient(
@@ -218,4 +217,3 @@ class SecurityTest(xds_k8s_testcase.SecurityXdsKubernetesTestCase):
 
 if __name__ == "__main__":
     absltest.main()
-
