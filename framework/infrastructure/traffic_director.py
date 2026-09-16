@@ -1461,4 +1461,3 @@ class TrafficDirectorAppNetSecureManager(TrafficDirectorSecureManager):
         self.delete_grpc_route(force=force)
         self.delete_mesh(force=force)
         super().cleanup(force=force)
-

@@ -1507,9 +1507,9 @@ class SecurityXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
         wait_for_active_ads_timeout: Optional[_timedelta] = _timedelta(
             minutes=10
         ),
-        wait_for_server_channel_ready_timeout: Optional[_timedelta] = _timedelta(
-            minutes=10
-        ),
+        wait_for_server_channel_ready_timeout: Optional[
+            _timedelta
+        ] = _timedelta(minutes=10),
         config_mesh: Optional[str] = None,
         **kwargs,
     ) -> XdsTestClient:
@@ -1821,5 +1821,3 @@ class SecurityXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
             return "missing"
         sha1 = hashlib.sha1(cert)
         return f"sha1={sha1.hexdigest()}, len={len(cert)}"
-
-
