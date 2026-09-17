@@ -64,9 +64,6 @@ flags.adopt_module_key_flags(xds_k8s_flags)
 TrafficDirectorManager = traffic_director.TrafficDirectorManager
 TrafficDirectorAppNetManager = traffic_director.TrafficDirectorAppNetManager
 TrafficDirectorSecureManager = traffic_director.TrafficDirectorSecureManager
-TrafficDirectorAppNetSecureManager = (
-    traffic_director.TrafficDirectorAppNetSecureManager
-)
 XdsTestServer = server_app.XdsTestServer
 XdsTestClient = client_app.XdsTestClient
 ClientDeploymentArgs = k8s_xds_client_runner.ClientDeploymentArgs
@@ -1352,7 +1349,7 @@ class AppNetXdsKubernetesTestCase(RegularXdsKubernetesTestCase):
 class SecurityXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
     """Test case base class for testing PSM security features in isolation."""
 
-    td: TrafficDirectorAppNetSecureManager
+    td: TrafficDirectorSecureManager
 
     class SecurityMode(enum.Enum):
         MTLS = enum.auto()
@@ -1375,8 +1372,8 @@ class SecurityXdsKubernetesTestCase(IsolatedXdsKubernetesTestCase):
                 KubernetesServerRunner.DEFAULT_SECURE_MODE_MAINTENANCE_PORT
             )
 
-    def initTrafficDirectorManager(self) -> TrafficDirectorAppNetSecureManager:
-        return TrafficDirectorAppNetSecureManager(
+    def initTrafficDirectorManager(self) -> TrafficDirectorSecureManager:
+        return TrafficDirectorSecureManager(
             self.gcp_api_manager,
             project=self.project,
             resource_prefix=self.resource_prefix,

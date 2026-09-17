@@ -77,7 +77,6 @@ _MODE = flags.DEFINE_enum(
         "default",
         "secure",
         "app_net",
-        "appnet_secure",
         "gamma",
     ],
     help="Select setup mode",
@@ -100,12 +99,11 @@ flags.adopt_module_key_flags(xds_k8s_flags)
 # Flag validations.
 # Running outside of a test suite, so require explicit resource_suffix.
 flags.mark_flag_as_required(xds_flags.RESOURCE_SUFFIX.name)
-# Require --security when --mode=secure or --mode=appnet_secure.
+# Require --security when --mode=secure.
 flags.register_multi_flags_validator(
     (_MODE, _SECURITY),
-    lambda values: values[_MODE.name] not in ("secure", "appnet_secure")
-    or values[_SECURITY.name],
-    "When --mode=secure or --mode=appnet_secure; --security flag is required",
+    lambda values: values[_MODE.name] != "secure" or values[_SECURITY.name],
+    "When --mode=secure; --security flag is required",
 )
 
 
@@ -135,13 +133,14 @@ def _setup_td_secure(
     server_xds_host,
     server_xds_port,
 ):
+    td.setup_backend_for_grpc(
+        health_check_port=server_maintenance_port,
+    )
+    td.create_mesh()
+    td.create_grpc_route(server_xds_host, server_xds_port)
+
     if security_mode == "mtls":
         logger.info("Setting up mtls")
-        td.setup_for_grpc(
-            server_xds_host,
-            server_xds_port,
-            health_check_port=server_maintenance_port,
-        )
         td.setup_server_security(
             server_namespace=server_namespace,
             server_name=server_name,
@@ -157,11 +156,6 @@ def _setup_td_secure(
         )
     elif security_mode == "tls":
         logger.info("Setting up tls")
-        td.setup_for_grpc(
-            server_xds_host,
-            server_xds_port,
-            health_check_port=server_maintenance_port,
-        )
         td.setup_server_security(
             server_namespace=server_namespace,
             server_name=server_name,
@@ -177,11 +171,6 @@ def _setup_td_secure(
         )
     elif security_mode == "plaintext":
         logger.info("Setting up plaintext")
-        td.setup_for_grpc(
-            server_xds_host,
-            server_xds_port,
-            health_check_port=server_maintenance_port,
-        )
         td.setup_server_security(
             server_namespace=server_namespace,
             server_name=server_name,
@@ -199,11 +188,6 @@ def _setup_td_secure(
         # Error case: server expects client mTLS cert,
         # but client configured only for TLS
         logger.info("Setting up mtls_error")
-        td.setup_for_grpc(
-            server_xds_host,
-            server_xds_port,
-            health_check_port=server_maintenance_port,
-        )
         td.setup_server_security(
             server_namespace=server_namespace,
             server_name=server_name,
@@ -220,14 +204,7 @@ def _setup_td_secure(
     elif security_mode == "server_authz_error":
         # Error case: client does not authorize server
         # because of mismatched SAN name.
-        logger.info("Setting up mtls_error")
-        td.setup_for_grpc(
-            server_xds_host,
-            server_xds_port,
-            health_check_port=server_maintenance_port,
-        )
-        # Regular TLS setup, but with client policy configured using
-        # intentionality incorrect server_namespace.
+        logger.info("Setting up server_authz_error")
         td.setup_server_security(
             server_namespace=server_namespace,
             server_name=server_name,
@@ -253,100 +230,6 @@ def _setup_td_appnet(
     td.create_backend_service()
     td.create_mesh()
     td.create_grpc_route(server_xds_host, server_xds_port)
-
-
-def _setup_td_appnet_secure(
-    security_mode,
-    *,
-    td: traffic_director.TrafficDirectorAppNetSecureManager,
-    server_name,
-    server_namespace,
-    server_port,
-    server_maintenance_port,
-    server_xds_host,
-    server_xds_port,
-):
-    td.setup_backend_for_grpc(
-        health_check_port=server_maintenance_port,
-    )
-    td.create_mesh()
-    td.create_grpc_route(server_xds_host, server_xds_port)
-
-    if security_mode == "mtls":
-        logger.info("Setting up appnet mtls")
-        td.setup_server_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            server_port=server_port,
-            tls=True,
-            mtls=True,
-        )
-        td.setup_client_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            tls=True,
-            mtls=True,
-        )
-    elif security_mode == "tls":
-        logger.info("Setting up appnet tls")
-        td.setup_server_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            server_port=server_port,
-            tls=True,
-            mtls=False,
-        )
-        td.setup_client_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            tls=True,
-            mtls=False,
-        )
-    elif security_mode == "plaintext":
-        logger.info("Setting up appnet plaintext")
-        td.setup_server_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            server_port=server_port,
-            tls=False,
-            mtls=False,
-        )
-        td.setup_client_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            tls=False,
-            mtls=False,
-        )
-    elif security_mode == "mtls_error":
-        logger.info("Setting up appnet mtls_error")
-        td.setup_server_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            server_port=server_port,
-            tls=True,
-            mtls=True,
-        )
-        td.setup_client_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            tls=True,
-            mtls=False,
-        )
-    elif security_mode == "server_authz_error":
-        logger.info("Setting up appnet server_authz_error")
-        td.setup_server_security(
-            server_namespace=server_namespace,
-            server_name=server_name,
-            server_port=server_port,
-            tls=True,
-            mtls=False,
-        )
-        td.setup_client_security(
-            server_namespace=(f"incorrect-namespace-{rand.rand_string()}"),
-            server_name=server_name,
-            tls=True,
-            mtls=False,
-        )
 
 
 def _cmd_backends_add(td, server_name, server_namespace, server_port):
@@ -416,12 +299,6 @@ def main(
     td_attrs = common.td_attrs()
     if mode == "app_net":
         td = traffic_director.TrafficDirectorAppNetManager(**td_attrs)
-    elif mode == "appnet_secure":
-        td = traffic_director.TrafficDirectorAppNetSecureManager(**td_attrs)
-        if server_maintenance_port is None:
-            server_maintenance_port = (
-                _KubernetesServerRunner.DEFAULT_SECURE_MODE_MAINTENANCE_PORT
-            )
     elif mode == "secure":
         td = traffic_director.TrafficDirectorSecureManager(**td_attrs)
         if server_maintenance_port is None:
@@ -437,17 +314,6 @@ def main(
             if mode == "app_net":
                 _setup_td_appnet(
                     td=td,
-                    server_xds_host=server_xds_host,
-                    server_xds_port=server_xds_port,
-                )
-            elif mode == "appnet_secure":
-                _setup_td_appnet_secure(
-                    security_mode,
-                    td=td,
-                    server_name=server_name,
-                    server_namespace=server_namespace_name,
-                    server_port=server_port,
-                    server_maintenance_port=server_maintenance_port,
                     server_xds_host=server_xds_host,
                     server_xds_port=server_xds_port,
                 )
