@@ -143,6 +143,9 @@ SERVER_XDS_AUTHORITY = flags.DEFINE_string(
         "xds://authority/hostname:port\n"
     ),
 )
+SERVER_NETWORK = flags.DEFINE_string(
+    "server_network", default="default", help="GCP Network ID for server in a multi-network test suite"
+)
 
 # Test client
 CLIENT_NAME = flags.DEFINE_string(
@@ -235,6 +238,17 @@ MANAGED_IDENTITY = flags.DEFINE_string(
     help=("The Managed Identity to use for the test."),
 )
 
+# HTTP Connect flags
+FORWARD_PROXY_SERVICE_ATTACHMENT = flags.DEFINE_string(
+    "forward_proxy_service_attachment",
+    default=None,
+    help=("Pre-provisioned Server PSC Service Attachment injected into ephemeral Mesh (forwardProxyServiceAttachments)"),
+)
+EXPECTED_HTTP_CONNECT_PROXY = flags.DEFINE_string(
+    "expected_http_connect_proxy",
+    default=None,
+    help=("Expected HTTP Connect proxy address and port for CSDS and Channelz assertions."),
+)
 
 def set_socket_default_timeout_from_flag() -> None:
     """A helper to configure default socket timeout from a flag.
