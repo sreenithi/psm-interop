@@ -15,18 +15,23 @@ import logging
 
 from absl import flags
 from absl.testing import absltest
+from typing_extensions import override
 
 from framework import xds_flags
 from framework import xds_k8s_testcase
+from framework.infrastructure import k8s
+from framework.test_app.runners.k8s import k8s_xds_server_runner
 
 logger = logging.getLogger(__name__)
 flags.adopt_module_key_flags(xds_k8s_testcase)
 
 _XdsTestServer = xds_k8s_testcase.XdsTestServer
 _XdsTestClient = xds_k8s_testcase.XdsTestClient
+KubernetesServerRunner = k8s_xds_server_runner.KubernetesServerRunner
 
 class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
 
+    server_runner: KubernetesServerRunner
     server_network: str
     forward_proxy_service_attachment: str
 
@@ -40,6 +45,28 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
         cls.forward_proxy_service_attachment = (
             xds_flags.FORWARD_PROXY_SERVICE_ATTACHMENT.value
         )
+
+    @override
+    def initKubernetesServerRunner(self, **kwargs) -> KubernetesServerRunner:
+        return KubernetesServerRunner(
+            k8s.KubernetesNamespace(
+                self.secondary_k8s_api_manager, self.server_namespace
+            ),
+            deployment_name=self.server_name,
+            image_name=self.server_image,
+            td_bootstrap_image=self.td_bootstrap_image,
+            gcp_project=self.project,
+            gcp_api_manager=self.gcp_api_manager,
+            gcp_service_account=self.gcp_service_account,
+            xds_server_uri=self.xds_server_uri,
+            xds_server_region=self.xds_server_region,
+            network=self.server_network,
+            debug_use_port_forwarding=self.debug_use_port_forwarding,
+            enable_workload_identity=self.enable_workload_identity,
+            workload_identity_iam_policy_binding=self.workload_identity_iam_policy_binding,
+            **kwargs,
+        )
+
 
     def forward_proxy_service_attachment_name(self):
         return (
