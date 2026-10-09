@@ -239,6 +239,11 @@ MANAGED_IDENTITY = flags.DEFINE_string(
 )
 
 # HTTP Connect flags
+ENABLE_HTTP_CONNECT = flags.DEFINE_bool(
+    "enable_http_connect",
+    default=False,
+    help="Enables HTTP Connect specific client deployment args.",
+)
 FORWARD_PROXY_SERVICE_ATTACHMENT = flags.DEFINE_string(
     "forward_proxy_service_attachment",
     default=None,

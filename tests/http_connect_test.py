@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+from typing import TypeAlias
 
 from absl import flags
 from absl.testing import absltest
@@ -21,6 +22,7 @@ from framework import xds_flags
 from framework import xds_k8s_testcase
 from framework.infrastructure import k8s
 from framework.test_app.runners.k8s import k8s_xds_server_runner
+from framework.test_app.runners.k8s import k8s_xds_client_runner
 
 logger = logging.getLogger(__name__)
 flags.adopt_module_key_flags(xds_k8s_testcase)
@@ -28,12 +30,16 @@ flags.adopt_module_key_flags(xds_k8s_testcase)
 _XdsTestServer = xds_k8s_testcase.XdsTestServer
 _XdsTestClient = xds_k8s_testcase.XdsTestClient
 KubernetesServerRunner = k8s_xds_server_runner.KubernetesServerRunner
+KubernetesClientRunner: TypeAlias = k8s_xds_server_runner.KubernetesClientRunner
+ClientDeploymentArgs: TypeAlias = k8s_xds_client_runner.ClientDeploymentArgs
 
 class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
 
     server_runner: KubernetesServerRunner
+    client_runner: KubernetesClientRunner
     server_network: str
     forward_proxy_service_attachment: str
+    enable_http_connect: bool
 
     @classmethod
     def setUpClass(cls):
@@ -45,6 +51,7 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
         cls.forward_proxy_service_attachment = (
             xds_flags.FORWARD_PROXY_SERVICE_ATTACHMENT.value
         )
+        cls.enable_http_connect = xds_flags.ENABLE_HTTP_CONNECT.value
 
     @override
     def initKubernetesServerRunner(self, **kwargs) -> KubernetesServerRunner:
@@ -67,6 +74,13 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             **kwargs,
         )
 
+    @override
+    def initKubernetesClientRunner(self, **kwargs) -> KubernetesClientRunner:
+        return super().initKubernetesClientRunner(
+            deployment_args=ClientDeploymentArgs(
+                enable_http_connect=self.enable_http_connect,
+            )
+        )
 
     def forward_proxy_service_attachment_name(self):
         return (
