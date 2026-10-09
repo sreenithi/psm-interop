@@ -950,6 +950,7 @@ class TrafficDirectorAppNetManager(TrafficDirectorManager):
     MESH_NAME = "mesh"
 
     netsvc: gcp.network_services.NetworkServicesV1
+    netsvc_alpha: gcp.network_services.NetworkServicesAlpha1
 
     def __init__(
         self,
@@ -978,25 +979,27 @@ class TrafficDirectorAppNetManager(TrafficDirectorManager):
         self.netsvc = gcp.network_services.NetworkServicesV1(
             gcp_api_manager, project
         )
-
+        self.netsvc_alpha = gcp.network_services.NetworkServicesAlpha1(
+            gcp_api_manager, project
+        )
         # Managed resources
         # TODO(gnossen) PTAL at the pylint error
         self.grpc_route: Optional[GrpcRoute] = None
         self.http_route: Optional[HttpRoute] = None
         self.mesh: Optional[Mesh] = None
 
-    def create_mesh(self) -> Mesh:
+    def create_mesh(self, body={}, use_alpha=False) -> Mesh:
         name = self.make_resource_name(self.MESH_NAME)
         logger.info(
             "Creating Mesh %s in location %s", name, self.region or "global"
         )
-        body = {}
-        self.netsvc.create_mesh(name, body, location=self.region)
-        self.mesh = self.netsvc.get_mesh(name, location=self.region)
+        netsvc = self.netsvc if not use_alpha else self.netsvc_alpha
+        netsvc.create_mesh(name, body, location=self.region)
+        self.mesh = netsvc.get_mesh(name, location=self.region)
         logger.debug("Loaded Mesh: %s", self.mesh)
         return self.mesh
 
-    def delete_mesh(self, force=False):
+    def delete_mesh(self, use_alpha=False, force=False):
         if force:
             name = self.make_resource_name(self.MESH_NAME)
         elif self.mesh:
@@ -1004,7 +1007,8 @@ class TrafficDirectorAppNetManager(TrafficDirectorManager):
         else:
             return
         logger.info("Deleting Mesh %s", name)
-        self.netsvc.delete_mesh(name, location=self.region)
+        netsvc = self.netsvc if not use_alpha else self.netsvc_alpha
+        netsvc.delete_mesh(name, location=self.region)
         self.mesh = None
 
     def create_grpc_route(self, src_host: str, src_port: int) -> GrpcRoute:

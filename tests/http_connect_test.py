@@ -58,7 +58,12 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             self.td.create_backend_service()
 
         with self.subTest("03_create_mesh"):
-            self.td.create_mesh()
+            body = {
+                "forwardProxyServiceAttachments": [
+                    self.forward_proxy_service_attachment_name(),
+                ]
+            }
+            self.td.create_mesh(body=body, use_alpha=True)
 
         with self.subTest("04_create_grpc_route"):
             self.td.create_grpc_route(

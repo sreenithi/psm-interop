@@ -350,6 +350,41 @@ class _NetworkServicesBase(
             and exception.error.code == code_pb2.INTERNAL
         )
 
+class NetworkServicesAlpha1(_NetworkServicesBase):
+    """NetworkServices API v1alpha1."""
+
+    MESHES = "meshes"
+
+    @property
+    def api_version(self) -> str:
+        return "v1alpha1"
+
+    def create_mesh(
+        self, name: str, body: dict, location: Optional[str] = None
+    ) -> None:
+        self._create_resource(
+            collection=self._api_locations.meshes(),
+            body=body,
+            meshId=name,
+            location=location,
+        )
+
+    def get_mesh(self, name: str, location: Optional[str] = None) -> Mesh:
+        full_name = self.resource_full_name(
+            name, self.MESHES, location=location
+        )
+        result = self._get_resource(
+            collection=self._api_locations.meshes(), full_name=full_name
+        )
+        return Mesh.from_response(name, result)
+
+    def delete_mesh(self, name: str, location: Optional[str] = None) -> bool:
+        return self._delete_resource(
+            collection=self._api_locations.meshes(),
+            full_name=self.resource_full_name(
+                name, self.MESHES, location=location
+            ),
+        )
 
 class NetworkServicesV1Beta1(_NetworkServicesBase):
     """NetworkServices API v1beta1."""
