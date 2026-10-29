@@ -20,7 +20,9 @@ from typing_extensions import override
 
 from framework import xds_flags
 from framework import xds_k8s_testcase
+from framework.infrastructure import gcp
 from framework.infrastructure import k8s
+from framework.infrastructure import traffic_director
 from framework.test_app.runners.k8s import k8s_xds_server_runner
 from framework.test_app.runners.k8s import k8s_xds_client_runner
 
@@ -52,6 +54,17 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             xds_flags.FORWARD_PROXY_SERVICE_ATTACHMENT.value
         )
         cls.enable_http_connect = xds_flags.ENABLE_HTTP_CONNECT.value
+    @override
+    def initTrafficDirectorManager(
+        self,
+    ) -> traffic_director.TrafficDirectorAppNetManager:
+        td = super().initTrafficDirectorManager()
+
+        # Override netsvc to use alpha
+        td.netsvc = gcp.network_services.NetworkServicesAlpha1(
+            self.gcp_api_manager, self.project
+        )
+        return td
 
     @override
     def initKubernetesServerRunner(self, **kwargs) -> KubernetesServerRunner:
@@ -104,7 +117,7 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
                     self.forward_proxy_service_attachment_name(),
                 ]
             }
-            self.td.create_mesh(body=body, use_alpha=True)
+            self.td.create_mesh(body=body)
 
         with self.subTest("04_create_grpc_route"):
             self.td.create_grpc_route(
