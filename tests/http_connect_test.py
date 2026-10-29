@@ -113,6 +113,49 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             f"serviceAttachments/{self.forward_proxy_service_attachment}"
         )
 
+    def _assert_cds_transport_socket(self, cluster):
+        try:
+            ts = cluster["transportSocket"]
+            socket_type = ts["typedConfig"]["@type"]
+        except (KeyError, TypeError) as e:
+            error_msg = f"Expected transportSocket in CDS, but got {cluster}"
+            raise AssertionError(error_msg) from e
+
+        self.assertEqual(
+            socket_type,
+            "type.googleapis.com/envoy.extensions.transport_sockets.http_11_proxy.v3.Http11ProxyUpstreamTransport",
+            f"Expected cluster with envoy.transport_sockets.http_11_proxy in CDS: {cluster}",
+        )
+
+    def _assert_expected_http_connect_proxy_address(self, metadata):
+        try:
+            typed_meta = metadata["typedFilterMetadata"]
+            socket_addr = typed_meta[
+                "envoy.http11_proxy_transport_socket.proxy_address"
+            ]["socketAddress"]
+            ip = socket_addr["address"]
+            port = socket_addr["portValue"]
+        except (KeyError, TypeError) as e:
+            error_msg = f"Expected typedFilterMetadata to contain proxy address, but got {metadata}"
+            raise AssertionError(error_msg) from e
+
+        self.assertEqual(
+            f"{ip}:{port}",
+            self.expected_http_connect_proxy,
+        )
+
+    def _assert_transport_socket_network_type(self, metadata):
+        try:
+            filter_meta = metadata["filterMetadata"]
+            network_type = filter_meta["envoy.transport_socket_match"][
+                "networkType"
+            ]
+        except (KeyError, TypeError) as e:
+            error_msg = f"Expected filterMetadata to contain networkType, but got {metadata}"
+            raise AssertionError(error_msg) from e
+
+        self.assertEqual(network_type, "foreign")
+
     def _assert_psc_sa_target_gateway(self, service_attachment):
         target_service = service_attachment["targetService"]
         gateway_name = target_service.rsplit("/", 1)[-1]
@@ -224,13 +267,50 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             self.assertXdsConfigExists(test_client)
 
         with self.subTest("09_assert_xds_http_connect_config"):
-            pass
+            xds_config = test_client.csds.fetch_client_status_parsed(
+                log_level=logging.INFO
+            )
+
+            # TODO(sreenithi): Remove before raising for review
+            logger.info("CSDS DumpedXdsConfig:\n%s", xds_config)
+
+            # Assert only 1 cluster exists as we have only one backend service
+            self.assertLen(xds_config.cds, 1)
+
+            # Verify CDS transportSocket is envoy.transport_sockets.http_11_proxy
+            cluster = xds_config.cds[0]
+            self._assert_cds_transport_socket(cluster)
+
+            # Assert only 1 endpoint exists as we have only one backend service
+            self.assertLen(xds_config.eds, 1)
+            cla = xds_config.eds[0]
+            self.assertLen(cla.get("endpoints", []), 1)
+
+            endpoint = cla["endpoints"][0]
+            meta = endpoint.get("metadata", {})
+
+            self._assert_expected_http_connect_proxy_address(metadata=meta)
+
+            self._assert_transport_socket_network_type(metadata=meta)
 
         with self.subTest("10_assert_successful_rpcs"):
             self.assertSuccessfulRpcs(test_client)
 
         with self.subTest("11_assert_channelz_http_connect_address"):
-            pass
+            client_sock = test_client.get_active_server_channel_socket()
+            remote_addr = test_client.channelz.sock_address_to_str(
+                client_sock.remote
+            )
+            logger.info(
+                "Active client socket addresses: %s",
+                test_client.channelz.sock_addresses_pretty(client_sock),
+            )
+            if self.expected_http_connect_proxy:
+                self.assertEqual(
+                    remote_addr,
+                    self.expected_http_connect_proxy,
+                )
+
 
 if __name__ == "__main__":
     absltest.main(failfast=True)
