@@ -42,6 +42,8 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
     server_network: str
     forward_proxy_service_attachment: str
     enable_http_connect: bool
+    expected_http_connect_proxy: str
+    region: str
 
     @classmethod
     def setUpClass(cls):
@@ -54,6 +56,16 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             xds_flags.FORWARD_PROXY_SERVICE_ATTACHMENT.value
         )
         cls.enable_http_connect = xds_flags.ENABLE_HTTP_CONNECT.value
+        cls.expected_http_connect_proxy = (
+            xds_flags.EXPECTED_HTTP_CONNECT_PROXY.value
+        )
+        (
+            cls.expected_proxy_ip,
+            expected_proxy_port_str,
+        ) = cls.expected_http_connect_proxy.split(":")
+        cls.expected_proxy_port = int(expected_proxy_port_str)
+        cls.region = xds_flags.HTTP_CONNECT_REGION.value
+
     @override
     def initTrafficDirectorManager(
         self,
@@ -101,9 +113,80 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             f"serviceAttachments/{self.forward_proxy_service_attachment}"
         )
 
+    def _assert_psc_sa_target_gateway(self, service_attachment):
+        target_service = service_attachment["targetService"]
+        gateway_name = target_service.rsplit("/", 1)[-1]
+
+        gateway = self.td.netsvc.get_gateway(gateway_name, location=self.region)
+        self.assertTrue(
+            gateway["network"].endswith(f"/networks/{self.server_network}"),
+            f"Expected SWP gateway network to be {self.server_network}, "
+            f"got {gateway['network']}",
+        )
+        self.assertEqual(gateway["ports"], [self.expected_proxy_port])
+        logger.info(
+            "Verified the PSC Service attachment %s exists within %s "
+            "on port %d",
+            self.forward_proxy_service_attachment,
+            self.server_network,
+            self.expected_proxy_port,
+        )
+
+    def _assert_client_psc_forwarding_rule(self, service_attachment):
+        connected_endpoints = [
+            ep
+            for ep in service_attachment.get("connectedEndpoints", [])
+            if ep.get("consumerNetwork", "").endswith(
+                f"/networks/{self.network}"
+            )
+        ]
+
+        self.assertLen(
+            connected_endpoints,
+            1,
+            f"Expected 1 connected endpoint in {self.network} on "
+            f"service attachment {self.forward_proxy_service_attachment}, "
+            f"got {service_attachment.get('connectedEndpoints')}",
+        )
+        connected_ep = connected_endpoints[0]
+
+        # Verify PSC connection readiness on both data and control planes:
+        # - pscConnectionId is used by Traffic Director to map the
+        #   ServiceAttachment to the client PSC forwarding rule and populate
+        #   the proxy address in EDS.
+        # - status == "ACCEPTED" ensures the PSC tunnel can forward traffic
+        #   (pscConnectionId is set even if status is PENDING or REJECTED).
+        self.assertEqual(connected_ep.get("status"), "ACCEPTED")
+        self.assertIn("pscConnectionId", connected_ep)
+
+        fw_rule_name = connected_ep["endpoint"].rsplit("/", 1)[-1]
+
+        forwarding_rule = self.td.compute.get_forwarding_rule(
+            fw_rule_name, region=self.region
+        )
+
+        self.assertTrue(
+            forwarding_rule["network"].endswith(f"/networks/{self.network}"),
+            f"Expected forwarding rule network to be {self.network}, "
+            f"got {forwarding_rule['network']}",
+        )
+
+        self.assertEqual(forwarding_rule["IPAddress"], self.expected_proxy_ip)
+
     def test_http_connect(self):
         with self.subTest("00_check_preprovisioned_resources"):
-            pass
+            service_attachment = self.td.compute.get_service_attachment(
+                self.forward_proxy_service_attachment,
+                region=self.region,
+            )
+
+            # 1. Confirm Server PSC Service Attachment exists and targets an SWP
+            # gateway in --server_network on the expected proxy port.
+            self._assert_psc_sa_target_gateway(service_attachment)
+
+            # 2. Fetch Client PSC forwarding rule within --network and assert
+            # its IP address matches the expected proxy IP.
+            self._assert_client_psc_forwarding_rule(service_attachment)
 
         with self.subTest("01_create_health_check"):
             self.td.create_health_check()

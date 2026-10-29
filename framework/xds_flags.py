@@ -144,7 +144,9 @@ SERVER_XDS_AUTHORITY = flags.DEFINE_string(
     ),
 )
 SERVER_NETWORK = flags.DEFINE_string(
-    "server_network", default="default", help="GCP Network ID for server in a multi-network test suite"
+    "server_network",
+    default="default",
+    help="GCP Network ID for server in a multi-network test suite",
 )
 
 # Test client
@@ -244,16 +246,26 @@ ENABLE_HTTP_CONNECT = flags.DEFINE_bool(
     default=False,
     help="Enables HTTP Connect specific client deployment args.",
 )
+HTTP_CONNECT_REGION = flags.DEFINE_string(
+    "http_connect_region",
+    default=None,
+    help="GCP region for HTTP Connect regional resources.",
+)
 FORWARD_PROXY_SERVICE_ATTACHMENT = flags.DEFINE_string(
     "forward_proxy_service_attachment",
     default=None,
-    help=("Pre-provisioned Server PSC Service Attachment injected into ephemeral Mesh (forwardProxyServiceAttachments)"),
+    help=(
+        "Pre-provisioned Server PSC Service Attachment injected into ephemeral Mesh (forwardProxyServiceAttachments)"
+    ),
 )
 EXPECTED_HTTP_CONNECT_PROXY = flags.DEFINE_string(
     "expected_http_connect_proxy",
     default=None,
-    help=("Expected HTTP Connect proxy address and port for CSDS and Channelz assertions."),
+    help=(
+        "Expected HTTP Connect proxy address and port for CSDS and Channelz assertions."
+    ),
 )
+
 
 def set_socket_default_timeout_from_flag() -> None:
     """A helper to configure default socket timeout from a flag.
