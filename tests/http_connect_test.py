@@ -305,11 +305,7 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
                 "Active client socket addresses: %s",
                 test_client.channelz.sock_addresses_pretty(client_sock),
             )
-            if self.expected_http_connect_proxy:
-                self.assertEqual(
-                    remote_addr,
-                    self.expected_http_connect_proxy,
-                )
+            self.assertEqual(remote_addr, self.expected_http_connect_proxy)
 
 
 if __name__ == "__main__":
