@@ -23,8 +23,8 @@ from framework import xds_k8s_testcase
 from framework.infrastructure import gcp
 from framework.infrastructure import k8s
 from framework.infrastructure import traffic_director
-from framework.test_app.runners.k8s import k8s_xds_server_runner
 from framework.test_app.runners.k8s import k8s_xds_client_runner
+from framework.test_app.runners.k8s import k8s_xds_server_runner
 
 logger = logging.getLogger(__name__)
 flags.adopt_module_key_flags(xds_k8s_testcase)

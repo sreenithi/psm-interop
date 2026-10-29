@@ -254,9 +254,7 @@ HTTP_CONNECT_REGION = flags.DEFINE_string(
 FORWARD_PROXY_SERVICE_ATTACHMENT = flags.DEFINE_string(
     "forward_proxy_service_attachment",
     default=None,
-    help=(
-        "Pre-provisioned Server PSC Service Attachment injected into ephemeral Mesh (forwardProxyServiceAttachments)"
-    ),
+    help="Pre-provisioned Server PSC Service Attachment injected into Mesh",
 )
 EXPECTED_HTTP_CONNECT_PROXY = flags.DEFINE_string(
     "expected_http_connect_proxy",
