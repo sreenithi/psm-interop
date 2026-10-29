@@ -254,6 +254,7 @@ class TrafficDirectorManager:  # pylint: disable=too-many-public-methods
         locality_lb_policies: Optional[List[dict]] = None,
         outlier_detection: Optional[dict] = None,
         security_settings: Optional[dict] = None,
+        allow_multinetwork: bool = False,
     ):
         if protocol is None:
             protocol = _BackendGRPC
@@ -276,6 +277,7 @@ class TrafficDirectorManager:  # pylint: disable=too-many-public-methods
             enable_dualstack=self.enable_dualstack,
             security_settings=security_settings,
             region=self.region,
+            allow_multinetwork=allow_multinetwork,
         )
         self.backend_service = resource
         self.backend_service_protocol = protocol

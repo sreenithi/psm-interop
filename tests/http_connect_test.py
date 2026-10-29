@@ -32,11 +32,11 @@ flags.adopt_module_key_flags(xds_k8s_testcase)
 _XdsTestServer = xds_k8s_testcase.XdsTestServer
 _XdsTestClient = xds_k8s_testcase.XdsTestClient
 KubernetesServerRunner = k8s_xds_server_runner.KubernetesServerRunner
-KubernetesClientRunner: TypeAlias = k8s_xds_server_runner.KubernetesClientRunner
+KubernetesClientRunner: TypeAlias = k8s_xds_client_runner.KubernetesClientRunner
 ClientDeploymentArgs: TypeAlias = k8s_xds_client_runner.ClientDeploymentArgs
 
-class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
 
+class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
     server_runner: KubernetesServerRunner
     client_runner: KubernetesClientRunner
     server_network: str
@@ -192,7 +192,7 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             self.td.create_health_check()
 
         with self.subTest("02_create_backend_service"):
-            self.td.create_backend_service()
+            self.td.create_backend_service(allow_multinetwork=True)
 
         with self.subTest("03_create_mesh"):
             body = {

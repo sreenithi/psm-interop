@@ -156,6 +156,7 @@ class ComputeV1(
         security_settings: Optional[dict] = None,
         *,
         region: Optional[str] = None,
+        allow_multinetwork: bool = False,
     ) -> "GcpResource":
         if not isinstance(protocol, self.BackendServiceProtocol):
             raise TypeError(f"Unexpected Backend Service protocol: {protocol}")
@@ -192,6 +193,10 @@ class ComputeV1(
             body["localityLbPolicies"] = locality_lb_policies
         if outlier_detection:
             body["outlierDetection"] = outlier_detection
+
+        if allow_multinetwork:
+            body["allowMultinetwork"] = True
+
         collection = (
             self.api.regionBackendServices()
             if region
