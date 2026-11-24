@@ -113,109 +113,6 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             f"serviceAttachments/{self.forward_proxy_service_attachment}"
         )
 
-    def _assert_cds_transport_socket(self, cluster):
-        try:
-            ts = cluster["transportSocket"]
-            socket_type = ts["typedConfig"]["@type"]
-        except (KeyError, TypeError) as e:
-            error_msg = f"Expected transportSocket in CDS, but got {cluster}"
-            raise AssertionError(error_msg) from e
-
-        self.assertEqual(
-            socket_type,
-            "type.googleapis.com/envoy.extensions.transport_sockets.http_11_proxy.v3.Http11ProxyUpstreamTransport",
-            f"Expected cluster with envoy.transport_sockets.http_11_proxy in CDS: {cluster}",
-        )
-
-    def _assert_expected_http_connect_proxy_address(self, metadata):
-        try:
-            typed_meta = metadata["typedFilterMetadata"]
-            socket_addr = typed_meta[
-                "envoy.http11_proxy_transport_socket.proxy_address"
-            ]["socketAddress"]
-            ip = socket_addr["address"]
-            port = socket_addr["portValue"]
-        except (KeyError, TypeError) as e:
-            error_msg = f"Expected typedFilterMetadata to contain proxy address, but got {metadata}"
-            raise AssertionError(error_msg) from e
-
-        self.assertEqual(
-            f"{ip}:{port}",
-            self.expected_http_connect_proxy,
-        )
-
-    def _assert_transport_socket_network_type(self, metadata):
-        try:
-            filter_meta = metadata["filterMetadata"]
-            network_type = filter_meta["envoy.transport_socket_match"][
-                "networkType"
-            ]
-        except (KeyError, TypeError) as e:
-            error_msg = f"Expected filterMetadata to contain networkType, but got {metadata}"
-            raise AssertionError(error_msg) from e
-
-        self.assertEqual(network_type, "foreign")
-
-    def _assert_psc_sa_target_gateway(self, service_attachment):
-        target_service = service_attachment["targetService"]
-        gateway_name = target_service.rsplit("/", 1)[-1]
-
-        gateway = self.td.netsvc.get_gateway(gateway_name, location=self.region)
-        self.assertTrue(
-            gateway["network"].endswith(f"/networks/{self.server_network}"),
-            f"Expected SWP gateway network to be {self.server_network}, "
-            f"got {gateway['network']}",
-        )
-        self.assertEqual(gateway["ports"], [self.expected_proxy_port])
-        logger.info(
-            "Verified the PSC Service attachment %s exists within %s "
-            "on port %d",
-            self.forward_proxy_service_attachment,
-            self.server_network,
-            self.expected_proxy_port,
-        )
-
-    def _assert_client_psc_forwarding_rule(self, service_attachment):
-        connected_endpoints = [
-            ep
-            for ep in service_attachment.get("connectedEndpoints", [])
-            if ep.get("consumerNetwork", "").endswith(
-                f"/networks/{self.network}"
-            )
-        ]
-
-        self.assertLen(
-            connected_endpoints,
-            1,
-            f"Expected 1 connected endpoint in {self.network} on "
-            f"service attachment {self.forward_proxy_service_attachment}, "
-            f"got {service_attachment.get('connectedEndpoints')}",
-        )
-        connected_ep = connected_endpoints[0]
-
-        # Verify PSC connection readiness on both data and control planes:
-        # - pscConnectionId is used by Traffic Director to map the
-        #   ServiceAttachment to the client PSC forwarding rule and populate
-        #   the proxy address in EDS.
-        # - status == "ACCEPTED" ensures the PSC tunnel can forward traffic
-        #   (pscConnectionId is set even if status is PENDING or REJECTED).
-        self.assertEqual(connected_ep.get("status"), "ACCEPTED")
-        self.assertIn("pscConnectionId", connected_ep)
-
-        fw_rule_name = connected_ep["endpoint"].rsplit("/", 1)[-1]
-
-        forwarding_rule = self.td.compute.get_forwarding_rule(
-            fw_rule_name, region=self.region
-        )
-
-        self.assertTrue(
-            forwarding_rule["network"].endswith(f"/networks/{self.network}"),
-            f"Expected forwarding rule network to be {self.network}, "
-            f"got {forwarding_rule['network']}",
-        )
-
-        self.assertEqual(forwarding_rule["IPAddress"], self.expected_proxy_ip)
-
     def test_http_connect(self):
         with self.subTest("00_check_preprovisioned_resources"):
             service_attachment = self.td.compute.get_service_attachment(
@@ -225,11 +122,21 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
 
             # 1. Confirm Server PSC Service Attachment exists and targets an SWP
             # gateway in --server_network on the expected proxy port.
-            self._assert_psc_sa_target_gateway(service_attachment)
+            self.assertPscServiceAttachmentTargetsSwpGateway(
+                service_attachment,
+                network=self.server_network,
+                region=self.region,
+                port=self.expected_proxy_port,
+            )
 
             # 2. Fetch Client PSC forwarding rule within --network and assert
             # its IP address matches the expected proxy IP.
-            self._assert_client_psc_forwarding_rule(service_attachment)
+            self.assertClientPscForwardingRule(
+                service_attachment,
+                network=self.network,
+                region=self.region,
+                expected_ip=self.expected_proxy_ip,
+            )
 
         with self.subTest("01_create_health_check"):
             self.td.create_health_check()
@@ -279,7 +186,7 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
 
             # Verify CDS transportSocket is envoy.transport_sockets.http_11_proxy
             cluster = xds_config.cds[0]
-            self._assert_cds_transport_socket(cluster)
+            self.assertCdsHttpConnectTransportSocket(cluster)
 
             # Assert only 1 endpoint exists as we have only one backend service
             self.assertLen(xds_config.eds, 1)
@@ -289,9 +196,11 @@ class HttpConnectTest(xds_k8s_testcase.AppNetXdsKubernetesTestCase):
             endpoint = cla["endpoints"][0]
             meta = endpoint.get("metadata", {})
 
-            self._assert_expected_http_connect_proxy_address(metadata=meta)
+            self.assertEdsHttpConnectProxyAddress(
+                meta, self.expected_http_connect_proxy
+            )
 
-            self._assert_transport_socket_network_type(metadata=meta)
+            self.assertEdsTransportSocketNetworkType(meta)
 
         with self.subTest("10_assert_successful_rpcs"):
             self.assertSuccessfulRpcs(test_client)

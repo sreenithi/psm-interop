@@ -1075,6 +1075,168 @@ class XdsKubernetesBaseTestCase(
             ),
         )
 
+    # ------------------------------------------------------------------
+    # Helpers for HTTP CONNECT tests.
+    # ------------------------------------------------------------------
+
+    def assertPscServiceAttachmentTargetsSwpGateway(
+        self,
+        service_attachment: dict[str, Any],
+        *,
+        network: str,
+        region: str,
+        port: int,
+    ) -> None:
+        """Asserts the PSC Service Attachment targets an SWP gateway.
+
+        Confirms the Secure Web Proxy gateway the Service Attachment points to
+        is located in the given network, and listens on the given port.
+        """
+        target_service = service_attachment["targetService"]
+        gateway_name = target_service.rsplit("/", 1)[-1]
+
+        gateway = self.td.netsvc.get_gateway(gateway_name, location=region)
+        self.assertTrue(
+            gateway["network"].endswith(f"/networks/{network}"),
+            (
+                f"Expected SWP gateway network to be {network}, "
+                f"got {gateway['network']}"
+            ),
+        )
+        self.assertEqual(gateway["ports"], [port])
+        logger.info(
+            (
+                "Verified the PSC Service attachment %s exists within %s "
+                "on port %d"
+            ),
+            service_attachment.get("name"),
+            network,
+            port,
+        )
+
+    def assertClientPscForwardingRule(
+        self,
+        service_attachment: dict[str, Any],
+        *,
+        network: str,
+        region: str,
+        expected_ip: str,
+    ) -> None:
+        """Asserts the client PSC forwarding rule is connected and ready.
+
+        Finds the PSC endpoint in the given (client) network connected to the
+        Service Attachment, and asserts the connection is accepted, and that
+        its forwarding rule IP address matches the expected one.
+        """
+        connected_endpoints = [
+            ep
+            for ep in service_attachment.get("connectedEndpoints", [])
+            if ep.get("consumerNetwork", "").endswith(f"/networks/{network}")
+        ]
+
+        self.assertLen(
+            connected_endpoints,
+            1,
+            (
+                f"Expected 1 connected endpoint in {network} on "
+                f"service attachment {service_attachment.get('name')}, "
+                f"got {service_attachment.get('connectedEndpoints')}"
+            ),
+        )
+        connected_ep = connected_endpoints[0]
+
+        # Verify PSC connection readiness on both data and control planes:
+        # - pscConnectionId is used by Traffic Director to map the
+        #   ServiceAttachment to the client PSC forwarding rule and populate
+        #   the proxy address in EDS.
+        # - status == "ACCEPTED" ensures the PSC tunnel can forward traffic
+        #   (pscConnectionId is set even if status is PENDING or REJECTED).
+        self.assertEqual(connected_ep.get("status"), "ACCEPTED")
+        self.assertIn("pscConnectionId", connected_ep)
+
+        fw_rule_name = connected_ep["endpoint"].rsplit("/", 1)[-1]
+
+        forwarding_rule = self.td.compute.get_forwarding_rule(
+            fw_rule_name, region=region
+        )
+
+        self.assertTrue(
+            forwarding_rule["network"].endswith(f"/networks/{network}"),
+            (
+                f"Expected forwarding rule network to be {network}, "
+                f"got {forwarding_rule['network']}"
+            ),
+        )
+
+        self.assertEqual(forwarding_rule["IPAddress"], expected_ip)
+
+    def assertCdsHttpConnectTransportSocket(
+        self, cluster: dict[str, Any]
+    ) -> None:
+        """Asserts the CDS Cluster uses the HTTP CONNECT transport socket."""
+        try:
+            ts = cluster["transportSocket"]
+            socket_type = ts["typedConfig"]["@type"]
+        except (KeyError, TypeError) as e:
+            error_msg = f"Expected transportSocket in CDS, but got {cluster}"
+            raise AssertionError(error_msg) from e
+
+        self.assertEqual(
+            socket_type,
+            (
+                "type.googleapis.com/envoy.extensions.transport_sockets"
+                ".http_11_proxy.v3.Http11ProxyUpstreamTransport"
+            ),
+            (
+                "Expected cluster with envoy.transport_sockets.http_11_proxy"
+                f" in CDS: {cluster}"
+            ),
+        )
+
+    def assertEdsHttpConnectProxyAddress(
+        self, metadata: dict[str, Any], expected_proxy_address: str
+    ) -> None:
+        """Asserts the EDS endpoint metadata contains the expected proxy address.
+
+        Args:
+            metadata: EDS LbEndpoint metadata.
+            expected_proxy_address: Expected HTTP CONNECT proxy address,
+                in <ip>:<port> format.
+        """
+        try:
+            typed_meta = metadata["typedFilterMetadata"]
+            socket_addr = typed_meta[
+                "envoy.http11_proxy_transport_socket.proxy_address"
+            ]["socketAddress"]
+            ip = socket_addr["address"]
+            port = socket_addr["portValue"]
+        except (KeyError, TypeError) as e:
+            error_msg = f"Expected typedFilterMetadata to contain proxy address, but got {metadata}"
+            raise AssertionError(error_msg) from e
+
+        self.assertEqual(f"{ip}:{port}", expected_proxy_address)
+
+    def assertEdsTransportSocketNetworkType(
+        self, metadata: dict[str, Any], expected_network_type: str = "foreign"
+    ) -> None:
+        """Asserts the EDS endpoint metadata contains the expected networkType.
+
+        Args:
+            metadata: EDS LbEndpoint metadata.
+            expected_network_type: Expected value of
+                envoy.transport_socket_match networkType.
+        """
+        try:
+            filter_meta = metadata["filterMetadata"]
+            network_type = filter_meta["envoy.transport_socket_match"][
+                "networkType"
+            ]
+        except (KeyError, TypeError) as e:
+            error_msg = f"Expected filterMetadata to contain networkType, but got {metadata}"
+            raise AssertionError(error_msg) from e
+
+        self.assertEqual(network_type, expected_network_type)
+
 
 class IsolatedXdsKubernetesTestCase(
     XdsKubernetesBaseTestCase, metaclass=abc.ABCMeta
